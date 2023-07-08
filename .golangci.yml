@@ -1,0 +1,12 @@
+run:
+  modules-download-mode: readonly
+output:
+  print-issued-lines: false
+
+linters:
+  enable:
+    - gofumpt
+    - gci
+    - gocritic
+    - revive
+    - gosec
