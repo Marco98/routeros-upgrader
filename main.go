@@ -41,6 +41,7 @@ func main() {
 	noupdfw := flag.Bool("nofw", false, "dont upgrade routerboard firmware")
 	cpath := flag.String("c", "routers.yml", "config path")
 	tag := flag.String("t", "", "filter tag")
+	forceyes := flag.Bool("y", false, "force yes")
 	flag.Parse()
 	rts, err := parseConfig(*cpath, *tag)
 	if err != nil {
@@ -71,7 +72,7 @@ func main() {
 		log.Println("no action required - exiting")
 		return
 	}
-	if !askYN("Install?") {
+	if !askYN("Install?", *forceyes) {
 		return
 	}
 
@@ -84,7 +85,7 @@ func main() {
 	}
 
 	// Reboot
-	if !askYN("Execute synchronized reboot?") {
+	if !askYN("Execute synchronized reboot?", *forceyes) {
 		return
 	}
 	if err := rebootRouters(append(pkgupdrts, fwupdrts...)); err != nil {
@@ -251,7 +252,10 @@ func upgradeFirmware(rts []RosParams) error {
 	return nil
 }
 
-func askYN(question string) bool {
+func askYN(question string, forceyes bool) bool {
+	if forceyes {
+		return true
+	}
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Printf("%s [y/N]: ", question)
 	response, err := reader.ReadString('\n')
