@@ -33,6 +33,9 @@ func GetLatest() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request returned: %s", resp.Status)
+	}
 	s, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -57,6 +60,9 @@ func (c *Cache) GetPackage(pkg PkgID) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download returned: %s", resp.Status)
+	}
 	bb, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
