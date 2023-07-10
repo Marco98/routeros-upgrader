@@ -51,6 +51,7 @@ func (c *Cache) GetPackage(pkg PkgID) ([]byte, error) {
 		return bb, nil
 	}
 	fname := fmt.Sprintf("%s-%s-%s.npk", pkg.Name, pkg.Version, pkg.Architecture)
+	fname = strings.ReplaceAll(fname, "-x86_64.npk", ".npk") // x86 does not have a suffix
 	log.Printf("downloading \"%s\"", fname)
 	resp, err := http.Get(fmt.Sprintf(
 		"http://upgrade.mikrotik.com/routeros/%s/%s",
