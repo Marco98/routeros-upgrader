@@ -6,6 +6,7 @@ require (
 	github.com/fatih/color v1.15.0
 	github.com/pkg/sftp v1.13.5
 	golang.org/x/crypto v0.11.0
+	golang.org/x/sync v0.3.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

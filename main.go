@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Marco98/routeros-upgrader/pkg/rosapi"
@@ -15,6 +16,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,9 +35,16 @@ type RosParams struct {
 	Arch            string
 	CurrentFirmware string
 	UpgradeFirmware string
+	Conn            *ssh.Client
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatalf("fatal error: %s", err)
+	}
+}
+
+func run() error {
 	// Config
 	tver := flag.String("tgt", "latest", "target package version")
 	noupdfw := flag.Bool("nofw", false, "dont upgrade routerboard firmware")
@@ -45,52 +54,57 @@ func main() {
 	flag.Parse()
 	rts, err := parseConfig(*cpath, *tag)
 	if err != nil {
-		log.Fatalf("%s", err)
+		return err
 	}
 
 	// Get latest version
 	if *tver == "latest" {
 		lver, err := rospkg.GetLatest()
 		if err != nil {
-			log.Fatalf("%s", err)
+			return err
 		}
 		tver = &lver
 	}
 	log.Printf("the target version is: %s", *tver)
 
+	// Connect
+	err = connectRouters(rts)
+	for _, rt := range rts {
+		if rt.Conn != nil {
+			defer rt.Conn.Close()
+		}
+	}
+	if err != nil {
+		return err
+	}
+
 	// Plan upgrades
 	log.Println("checking installed packages")
-	for i, rt := range rts {
-		r, err := getRouterPkgInfo(rt)
-		if err != nil {
-			log.Fatalf("%s", err)
-		}
-		rts[i] = r
+	if err := getRouterPkgInfo(rts); err != nil {
+		return err
 	}
 	pkgupdrts, fwupdrts := planUpgrades(rts, tver, *noupdfw)
 	if len(pkgupdrts) == 0 && len(fwupdrts) == 0 {
 		log.Println("no action required - exiting")
-		return
+		return nil
 	}
 	if !askYN("Install?", *forceyes) {
-		return
+		return nil
 	}
 
 	// Upgrade
 	if err := uploadPackages(pkgupdrts, *tver); err != nil {
-		log.Fatalf("%s", err)
+		return err
 	}
 	if err := upgradeFirmware(fwupdrts); err != nil {
-		log.Fatalf("%s", err)
+		return err
 	}
 
 	// Reboot
 	if !askYN("Execute synchronized reboot?", *forceyes) {
-		return
+		return nil
 	}
-	if err := rebootRouters(append(pkgupdrts, fwupdrts...)); err != nil {
-		log.Fatalf("%s", err)
-	}
+	return rebootRouters(append(pkgupdrts, fwupdrts...))
 }
 
 type Conf struct {
@@ -140,6 +154,25 @@ func parseConfig(path, tag string) ([]RosParams, error) {
 	return rr, nil
 }
 
+func connectRouters(rts []RosParams) error {
+	wg := new(errgroup.Group)
+	l := new(sync.Mutex)
+	for fi, frt := range rts {
+		i, rt := fi, frt
+		wg.Go(func() error {
+			conn, err := createConn(rt.Address, rt.User, rt.Password)
+			if err != nil {
+				return err
+			}
+			l.Lock()
+			rts[i].Conn = conn
+			l.Unlock()
+			return nil
+		})
+	}
+	return wg.Wait()
+}
+
 func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupdrts []RosParams) {
 	pkgupdrts = make([]RosParams, 0)
 	fwupdrts = make([]RosParams, 0)
@@ -177,79 +210,72 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 }
 
 func rebootRouters(rts []RosParams) error {
-	for _, rt := range rts {
-		conn, err := createConn(rt.Address, rt.User, rt.Password)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-		if err := rosapi.ExecReboot(conn, 10); err != nil {
-			return err
-		}
-		log.Printf("%s: rebooting in 10s", rt.Name)
+	wg := new(errgroup.Group)
+	for _, frt := range rts {
+		rt := frt
+		wg.Go(func() error {
+			defer rt.Conn.Close()
+			if err := rosapi.ExecReboot(rt.Conn, 10); err != nil {
+				return err
+			}
+			log.Printf("%s: rebooting in 10s", rt.Name)
+			return nil
+		})
 	}
-	return nil
+	return wg.Wait()
 }
 
 func uploadPackages(rts []RosParams, lver string) error {
 	cache := rospkg.NewCache()
-	for _, rt := range rts {
-		conn, err := createConn(rt.Address, rt.User, rt.Password)
-		defer func() {
-			if conn.Close(); err != nil {
-				log.Printf("%s", err)
-			}
-		}()
-		if err != nil {
-			return err
-		}
-		client, err := sftp.NewClient(conn)
-		if err != nil {
-			return err
-		}
-		defer client.Close()
-		for _, p := range rt.Pkgs {
-			pkg, err := cache.GetPackage(rospkg.PkgID{
-				Name:         p.Name,
-				Version:      lver,
-				Architecture: rt.Arch,
-			})
+	wg := new(errgroup.Group)
+	for _, frt := range rts {
+		rt := frt
+		wg.Go(func() error {
+			client, err := sftp.NewClient(rt.Conn)
 			if err != nil {
 				return err
 			}
-			fname := fmt.Sprintf("%s-%s-%s.npk", p.Name, lver, rt.Arch)
-			f, err := client.Create(fname)
-			if err != nil {
-				return err
+			defer client.Close()
+			for _, p := range rt.Pkgs {
+				pkg, err := cache.GetPackage(rospkg.PkgID{
+					Name:         p.Name,
+					Version:      lver,
+					Architecture: rt.Arch,
+				})
+				if err != nil {
+					return err
+				}
+				fname := fmt.Sprintf("%s-%s-%s.npk", p.Name, lver, rt.Arch)
+				f, err := client.Create(fname)
+				if err != nil {
+					return err
+				}
+				buf := bytes.NewBuffer(pkg)
+				_, err = buf.WriteTo(f)
+				if err != nil {
+					return err
+				}
+				log.Printf("%s: uploaded %s", rt.Name, fname)
 			}
-			buf := bytes.NewBuffer(pkg)
-			_, err = buf.WriteTo(f)
-			if err != nil {
-				return err
-			}
-			log.Printf("%s: uploaded %s", rt.Name, fname)
-		}
+			return nil
+		})
 	}
-	return nil
+	return wg.Wait()
 }
 
 func upgradeFirmware(rts []RosParams) error {
-	for _, rt := range rts {
-		conn, err := createConn(rt.Address, rt.User, rt.Password)
-		defer func() {
-			if conn.Close(); err != nil {
-				log.Printf("%s", err)
+	wg := new(errgroup.Group)
+	for _, frt := range rts {
+		rt := frt
+		wg.Go(func() error {
+			if err := rosapi.DoFirmwareUpgrade(rt.Conn); err != nil {
+				return err
 			}
-		}()
-		if err != nil {
-			return err
-		}
-		if err := rosapi.DoFirmwareUpgrade(conn); err != nil {
-			return err
-		}
-		log.Printf("%s: upgraded firmware", rt.Name)
+			log.Printf("%s: upgraded firmware", rt.Name)
+			return nil
+		})
 	}
-	return nil
+	return wg.Wait()
 }
 
 func askYN(question string, forceyes bool) bool {
@@ -280,34 +306,37 @@ func createConn(addr, user, pass string) (*ssh.Client, error) {
 	return conn, nil
 }
 
-func getRouterPkgInfo(rt RosParams) (RosParams, error) {
-	if len(rt.Address) == 0 {
-		rt.Address = rt.Name
+func getRouterPkgInfo(rts []RosParams) error {
+	wg := new(errgroup.Group)
+	for fi, frt := range rts {
+		i, rt := fi, frt
+		wg.Go(func() error {
+			if len(rt.Address) == 0 {
+				rt.Address = rt.Name
+			}
+			pp, err := rosapi.GetPackages(rt.Conn)
+			if err != nil {
+				return err
+			}
+			rt.Pkgs = pp
+			arch, err := rosapi.GetArchitecture(rt.Conn)
+			if err != nil {
+				return err
+			}
+			rt.Arch = arch
+			fwcurrent, err := rosapi.GetFirmwareCurrent(rt.Conn)
+			if err != nil {
+				return err
+			}
+			rt.CurrentFirmware = fwcurrent
+			fwnew, err := rosapi.GetFirmwareUpgrade(rt.Conn)
+			if err != nil {
+				return err
+			}
+			rt.UpgradeFirmware = fwnew
+			rts[i] = rt
+			return nil
+		})
 	}
-	conn, err := createConn(rt.Address, rt.User, rt.Password)
-	if err != nil {
-		return rt, err
-	}
-	defer conn.Close()
-	pp, err := rosapi.GetPackages(conn)
-	if err != nil {
-		return rt, err
-	}
-	rt.Pkgs = pp
-	arch, err := rosapi.GetArchitecture(conn)
-	if err != nil {
-		return rt, err
-	}
-	rt.Arch = arch
-	fwcurrent, err := rosapi.GetFirmwareCurrent(conn)
-	if err != nil {
-		return rt, err
-	}
-	rt.CurrentFirmware = fwcurrent
-	fwnew, err := rosapi.GetFirmwareUpgrade(conn)
-	if err != nil {
-		return rt, err
-	}
-	rt.UpgradeFirmware = fwnew
-	return rt, nil
+	return wg.Wait()
 }
