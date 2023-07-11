@@ -162,6 +162,9 @@ func connectRouters(rts []RosParams) error {
 		wg.Go(func() error {
 			conn, err := createConn(rt.Address, rt.User, rt.Password)
 			if err != nil {
+				if strings.Contains(err.Error(), "i/o timeout") {
+					return nil
+				}
 				return err
 			}
 			l.Lock()
@@ -178,6 +181,12 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 	fwupdrts = make([]RosParams, 0)
 	for _, rt := range rts {
 		pkg := false
+		if rt.Conn == nil {
+			color.Red(
+				"|DN> %s: unreachable\n", rt.Name,
+			)
+			continue
+		}
 		for _, p := range rt.Pkgs {
 			if p.Version != *tver {
 				color.Yellow(
@@ -313,6 +322,9 @@ func getRouterPkgInfo(rts []RosParams) error {
 		wg.Go(func() error {
 			if len(rt.Address) == 0 {
 				rt.Address = rt.Name
+			}
+			if rt.Conn == nil {
+				return nil
 			}
 			pp, err := rosapi.GetPackages(rt.Conn)
 			if err != nil {
