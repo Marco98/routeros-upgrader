@@ -2,6 +2,10 @@
 
 Mass-Upgrade Mikrotik RouterOS devices synchronized
 
+## Demo
+
+https://github.com/Marco98/routeros-upgrader/assets/24938492/33cb2a66-91d8-4fe6-b195-984e1124cba8
+
 ## Usage
 
 ### routers.yml
