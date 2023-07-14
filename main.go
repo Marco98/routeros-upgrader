@@ -49,10 +49,15 @@ func run() error {
 	tver := flag.String("tgt", "latest", "target package version")
 	noupdfw := flag.Bool("nofw", false, "dont upgrade routerboard firmware")
 	cpath := flag.String("c", "routers.yml", "config path")
-	tag := flag.String("t", "", "filter tag")
+	tags := flag.String("t", "", "filter tags")
+	limit := flag.String("l", "", "limit routers")
 	forceyes := flag.Bool("y", false, "force yes")
 	flag.Parse()
-	rts, err := parseConfig(*cpath, *tag)
+	rts, err := parseConfig(
+		*cpath,
+		strings.Split(*tags, ","),
+		strings.Split(*limit, ","),
+	)
 	if err != nil {
 		return err
 	}
@@ -119,7 +124,7 @@ type ConfRouter struct {
 	Password string `yaml:"password"`
 }
 
-func parseConfig(path, tag string) ([]RosParams, error) {
+func parseConfig(path string, tags, limit []string) ([]RosParams, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -132,11 +137,11 @@ func parseConfig(path, tag string) ([]RosParams, error) {
 	}
 	rr := make([]RosParams, 0)
 	for _, r := range conf.Routers {
-		if len(tag) != 0 && tag != r.Tag {
-			continue
-		}
 		if len(r.Name) == 0 {
 			r.Name = r.Address
+		}
+		if filtersTag(tags, r.Tag) || filtersTag(limit, r.Name) {
+			continue
 		}
 		if len(r.User) == 0 {
 			r.User = "admin"
@@ -152,6 +157,18 @@ func parseConfig(path, tag string) ([]RosParams, error) {
 		})
 	}
 	return rr, nil
+}
+
+func filtersTag(ss []string, s string) bool {
+	if len(ss) == 0 || (len(ss) == 1 && ss[0] == "") {
+		return false
+	}
+	for _, v := range ss {
+		if v == s {
+			return false
+		}
+	}
+	return true
 }
 
 func connectRouters(rts []RosParams) error {

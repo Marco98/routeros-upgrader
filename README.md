@@ -32,10 +32,12 @@ routers:
 Usage of routeros-upgrader:
   -c string
         config path (default "routers.yml")
+  -l string
+        limit routers
   -nofw
         dont upgrade routerboard firmware
   -t string
-        filter tag
+        filter tags
   -tgt string
         target package version (default "latest")
   -y    force yes
