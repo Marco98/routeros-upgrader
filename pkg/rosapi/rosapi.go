@@ -103,7 +103,7 @@ func DoFirmwareUpgrade(conn *ssh.Client) error {
 	return sess.Run("/system/routerboard/upgrade")
 }
 
-func ExecReboot(conn *ssh.Client, secs uint16) error {
+func ExecReboot(conn *ssh.Client, secs uint) error {
 	sess, err := conn.NewSession()
 	if err != nil {
 		return err

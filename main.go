@@ -52,6 +52,7 @@ func run() error {
 	tags := flag.String("t", "", "filter tags")
 	limit := flag.String("l", "", "limit routers")
 	forceyes := flag.Bool("y", false, "force yes")
+	delaysecs := flag.Uint("d", 10, "reboot delay in seconds")
 	flag.Parse()
 	rts, err := parseConfig(
 		*cpath,
@@ -109,7 +110,7 @@ func run() error {
 	if !askYN("Execute synchronized reboot?", *forceyes) {
 		return nil
 	}
-	return rebootRouters(append(pkgupdrts, fwupdrts...))
+	return rebootRouters(append(pkgupdrts, fwupdrts...), *delaysecs)
 }
 
 type Conf struct {
@@ -235,16 +236,16 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 	return pkgupdrts, fwupdrts
 }
 
-func rebootRouters(rts []RosParams) error {
+func rebootRouters(rts []RosParams, delay uint) error {
 	wg := new(errgroup.Group)
 	for _, frt := range rts {
 		rt := frt
 		wg.Go(func() error {
 			defer rt.Conn.Close()
-			if err := rosapi.ExecReboot(rt.Conn, 10); err != nil {
+			if err := rosapi.ExecReboot(rt.Conn, delay); err != nil {
 				return err
 			}
-			log.Printf("%s: rebooting in 10s", rt.Name)
+			log.Printf("%s: rebooting in %ds", rt.Name, delay)
 			return nil
 		})
 	}

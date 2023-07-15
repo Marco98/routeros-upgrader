@@ -32,6 +32,8 @@ routers:
 Usage of routeros-upgrader:
   -c string
         config path (default "routers.yml")
+  -d uint
+        reboot delay in seconds (default 10)
   -l string
         limit routers
   -nofw
