@@ -20,10 +20,12 @@ routers:
   - address: rtr.example.com
     user: dieter
     password: passw0rd
+    tag: failover
   - address: 192.168.5.6:2222
     name: router3
     user: admin
     password: insecure
+    powerdep: router1
 ```
 
 ### Parameters

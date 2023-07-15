@@ -1,7 +1,9 @@
 routers:
-  - address: 192.168.1.2
-    name: router1
-    password: admin
+  - address: 192.168.1.2 # address to ssh into (required)
+    name: router1 # name to be shown in the app (optional, default: address)
+    user: dieter # username to use (optional, default: admin)
+    password: admin # password to use (required)
+    tag: failover # tag to filter with the -t parameter (optional)
   - address: rtr.example.com
     user: dieter
     password: passw0rd
@@ -10,3 +12,4 @@ routers:
     name: router3
     user: admin
     password: insecure
+    powerdep: router1

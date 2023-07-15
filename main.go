@@ -36,6 +36,7 @@ type RosParams struct {
 	CurrentFirmware string
 	UpgradeFirmware string
 	Conn            *ssh.Client
+	Powerdep        string
 }
 
 func main() {
@@ -123,6 +124,7 @@ type ConfRouter struct {
 	Address  string `yaml:"address"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
+	Powerdep string `yaml:"powerdep"`
 }
 
 func parseConfig(path string, tags, limit []string) ([]RosParams, error) {
@@ -155,6 +157,7 @@ func parseConfig(path string, tags, limit []string) ([]RosParams, error) {
 			Address:  r.Address,
 			User:     r.User,
 			Password: r.Password,
+			Powerdep: r.Powerdep,
 		})
 	}
 	return rr, nil
@@ -207,12 +210,6 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 		}
 		for _, p := range rt.Pkgs {
 			if p.Version != *tver {
-				color.Yellow(
-					"|UP> %s: %s-%s-%s => %s-%s-%s\n",
-					rt.Name,
-					p.Name, p.Version, rt.Arch,
-					p.Name, *tver, rt.Arch,
-				)
 				pkg = true
 				continue
 			}
@@ -227,13 +224,73 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 		}
 		if !noupdfw && !pkg && rt.CurrentFirmware != rt.UpgradeFirmware {
 			fwupdrts = append(fwupdrts, rt)
+		}
+	}
+
+	// powerdeps
+	pkgupdrts, fwupdrts = filterPowerdeps(pkgupdrts, fwupdrts)
+
+	// print results
+	for _, r := range pkgupdrts {
+		for _, p := range r.Pkgs {
+			if p.Version == *tver {
+				continue
+			}
 			color.Yellow(
-				"|UP> %s: fw %s => fw %s\n",
-				rt.Name, rt.CurrentFirmware, rt.UpgradeFirmware,
+				"|UP> %s: %s-%s-%s => %s-%s-%s\n",
+				r.Name,
+				p.Name, p.Version, r.Arch,
+				p.Name, *tver, r.Arch,
 			)
 		}
 	}
+	for _, r := range fwupdrts {
+		color.Yellow(
+			"|UP> %s: fw %s => fw %s\n",
+			r.Name, r.CurrentFirmware, r.UpgradeFirmware,
+		)
+	}
 	return pkgupdrts, fwupdrts
+}
+
+func filterPowerdeps(pkgupdrts []RosParams, fwupdrts []RosParams) ([]RosParams, []RosParams) {
+	depped := make([]string, 0)
+	for _, r := range append(pkgupdrts, fwupdrts...) {
+		if len(r.Powerdep) == 0 {
+			continue
+		}
+		for _, rc := range append(pkgupdrts, fwupdrts...) {
+			if rc.Name == r.Powerdep {
+				depped = append(depped, r.Name)
+				break
+			}
+		}
+	}
+	return filterPowerdepList(pkgupdrts, depped), filterPowerdepList(fwupdrts, depped)
+}
+
+func filterPowerdepList(rr []RosParams, pd []string) []RosParams {
+	nrr := make([]RosParams, 0)
+	for _, r := range rr {
+		if contiansString(pd, r.Name) {
+			color.Cyan(
+				"|PD> %s: (powerdep)\n",
+				r.Name,
+			)
+			continue
+		}
+		nrr = append(nrr, r)
+	}
+	return nrr
+}
+
+func contiansString(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func rebootRouters(rts []RosParams, delay uint) error {
