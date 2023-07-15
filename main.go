@@ -182,7 +182,7 @@ func connectRouters(rts []RosParams) error {
 				if strings.Contains(err.Error(), "i/o timeout") {
 					return nil
 				}
-				return err
+				return fmt.Errorf("failed to connect to %s: %w", rt.Name, err)
 			}
 			l.Lock()
 			rts[i].Conn = conn
