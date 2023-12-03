@@ -37,6 +37,7 @@ type RosParams struct {
 	UpgradeFirmware string
 	Conn            *ssh.Client
 	Powerdep        string
+	Extpkgs         []string
 }
 
 func main() {
@@ -54,11 +55,13 @@ func run() error {
 	limit := flag.String("l", "", "limit routers")
 	forceyes := flag.Bool("y", false, "force yes")
 	delaysecs := flag.Uint("d", 10, "reboot delay in seconds")
+	extpkgsS := flag.String("extpkgs", "", "install additional packages")
 	flag.Parse()
 	rts, err := parseConfig(
 		*cpath,
-		strings.Split(*tags, ","),
-		strings.Split(*limit, ","),
+		splitparamlist(*tags),
+		splitparamlist(*limit),
+		splitparamlist(*extpkgsS),
 	)
 	if err != nil {
 		return err
@@ -90,6 +93,7 @@ func run() error {
 	if err := getRouterPkgInfo(rts); err != nil {
 		return err
 	}
+	rts = injectExtpkgs(rts)
 	pkgupdrts, fwupdrts := planUpgrades(rts, tver, *noupdfw)
 	if len(pkgupdrts) == 0 && len(fwupdrts) == 0 {
 		log.Println("no action required - exiting")
@@ -119,15 +123,16 @@ type Conf struct {
 }
 
 type ConfRouter struct {
-	Name     string `yaml:"name"`
-	Tag      string `yaml:"tag"`
-	Address  string `yaml:"address"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Powerdep string `yaml:"powerdep"`
+	Name     string   `yaml:"name"`
+	Tag      string   `yaml:"tag"`
+	Address  string   `yaml:"address"`
+	User     string   `yaml:"user"`
+	Password string   `yaml:"password"`
+	Powerdep string   `yaml:"powerdep"`
+	Extpkgs  []string `yaml:"extpkgs"`
 }
 
-func parseConfig(path string, tags, limit []string) ([]RosParams, error) {
+func parseConfig(path string, tags, limit, extpkgs []string) ([]RosParams, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -149,6 +154,9 @@ func parseConfig(path string, tags, limit []string) ([]RosParams, error) {
 		if len(r.User) == 0 {
 			r.User = "admin"
 		}
+		if len(extpkgs) != 0 {
+			r.Extpkgs = extpkgs
+		}
 		if !strings.Contains(r.Address, ":") {
 			r.Address = fmt.Sprintf("%s:%d", r.Address, defaultSSHPort)
 		}
@@ -158,6 +166,7 @@ func parseConfig(path string, tags, limit []string) ([]RosParams, error) {
 			User:     r.User,
 			Password: r.Password,
 			Powerdep: r.Powerdep,
+			Extpkgs:  r.Extpkgs,
 		})
 	}
 	return rr, nil
@@ -426,4 +435,34 @@ func getRouterPkgInfo(rts []RosParams) error {
 		})
 	}
 	return wg.Wait()
+}
+
+func injectExtpkgs(rts []RosParams) []RosParams {
+	for ir, r := range rts {
+		for _, ep := range r.Extpkgs {
+			matched := false
+			for _, p := range r.Pkgs {
+				if p.Name == ep {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				r.Pkgs = append(r.Pkgs, rosapi.RosPkg{
+					Name:    ep,
+					Version: "0.0.0",
+				})
+			}
+		}
+		rts[ir] = r
+	}
+	return rts
+}
+
+func splitparamlist(s string) []string {
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return make([]string, 0)
+	}
+	return strings.Split(s, ",")
 }
