@@ -28,7 +28,7 @@ type PkgID struct {
 }
 
 func GetLatest() (string, error) {
-	resp, err := http.Get("http://upgrade.mikrotik.com/routeros/NEWEST7.stable")
+	resp, err := http.Get("http://upgrade.mikrotik.com/routeros/NEWESTa7.stable")
 	if err != nil {
 		return "", err
 	}
