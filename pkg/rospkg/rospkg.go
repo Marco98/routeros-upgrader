@@ -69,5 +69,6 @@ func (c *Cache) GetPackage(pkg PkgID) ([]byte, error) {
 		return nil, err
 	}
 	log.Printf("downloaded \"%s\" (%d bytes)", fname, len(bb))
+	c.cache[pkg] = bb
 	return bb, nil
 }
