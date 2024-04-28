@@ -53,16 +53,18 @@ func (c *Cache) GetPackage(pkg PkgID) ([]byte, error) {
 	fname := fmt.Sprintf("%s-%s-%s.npk", pkg.Name, pkg.Version, pkg.Architecture)
 	fname = strings.ReplaceAll(fname, "-x86_64.npk", ".npk") // x86 does not have a suffix
 	log.Printf("downloading \"%s\"", fname)
-	resp, err := http.Get(fmt.Sprintf(
+	url := fmt.Sprintf(
 		"http://upgrade.mikrotik.com/routeros/%s/%s",
 		pkg.Version, fname,
-	))
+	)
+	//nolint:gosec,G107
+	resp, err := http.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error fetching \"%s\": %w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download returned: %s", resp.Status)
+		return nil, fmt.Errorf("download of \"%s\" returned: %s", url, resp.Status)
 	}
 	bb, err := io.ReadAll(resp.Body)
 	if err != nil {
