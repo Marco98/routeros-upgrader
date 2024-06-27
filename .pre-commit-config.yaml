@@ -1,12 +1,25 @@
+# yaml-language-server: $schema=https://json.schemastore.org/pre-commit-config.json
+fail_fast: true
+default_install_hook_types: [pre-commit, commit-msg]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        stages: [pre-commit]
       - id: check-added-large-files
+
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.53.3
+    rev: v1.57.2
     hooks:
       - id: golangci-lint
+        stages: [pre-commit]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.2.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []

@@ -54,6 +54,7 @@ Usage of routeros-upgrader:
         filter tags
   -tgt string
         target package version (default "latest")
+  -v    print version
   -y    force yes
 ```
 

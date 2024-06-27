@@ -26,6 +26,12 @@ const (
 	defaultSSHUser    = "admin"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 type RosParams struct {
 	Name            string
 	Address         string
@@ -56,7 +62,11 @@ func run() error {
 	forceyes := flag.Bool("y", false, "force yes")
 	delaysecs := flag.Uint("d", 10, "reboot delay in seconds")
 	extpkgsS := flag.String("extpkgs", "", "install additional packages")
+	prversion := flag.Bool("v", false, "print version")
 	flag.Parse()
+	if *prversion {
+		return printVersion()
+	}
 	rts, err := parseConfig(
 		*cpath,
 		splitparamlist(*tags),
@@ -468,4 +478,9 @@ func splitparamlist(s string) []string {
 		return make([]string, 0)
 	}
 	return strings.Split(s, ",")
+}
+
+func printVersion() error {
+	_, err := fmt.Printf("Version: %s\nCommit Hash: %s\nBuild Date: %s\n", version, commit, date)
+	return err
 }
