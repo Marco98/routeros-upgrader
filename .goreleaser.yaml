@@ -45,6 +45,7 @@ aurs:
       name: Marco98
       email: Marco98@users.noreply.github.com
     skip_upload: auto
+    private_key: "{{ .Env.AUR_KEY }}"
     package: |-
       install -Dm755 "./routeros-upgrader" "${pkgdir}/usr/bin/routeros-upgrader"
       install -Dm644 "./LICENSE.md" "${pkgdir}/usr/share/licenses/routeros-upgrader/LICENSE"
