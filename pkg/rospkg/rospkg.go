@@ -9,16 +9,22 @@ import (
 	"sync"
 )
 
-type Cache struct {
-	cache map[PkgID][]byte
-	lock  *sync.Mutex
-}
+const (
+	mikrotikUpgradeBaseURL = "http://upgrade.mikrotik.com/routeros"
+)
 
-func NewCache() *Cache {
-	return &Cache{
-		cache: make(map[PkgID][]byte),
-		lock:  &sync.Mutex{},
-	}
+var (
+	packageCache   map[PkgID][]byte
+	packageLock    *sync.Mutex
+	getLatestCache map[string]string
+	getLatestLock  *sync.RWMutex
+)
+
+func init() {
+	packageCache = make(map[PkgID][]byte)
+	packageLock = &sync.Mutex{}
+	getLatestCache = make(map[string]string)
+	getLatestLock = &sync.RWMutex{}
 }
 
 type PkgID struct {
@@ -27,8 +33,17 @@ type PkgID struct {
 	Architecture string
 }
 
-func GetLatest() (string, error) {
-	resp, err := http.Get("http://upgrade.mikrotik.com/routeros/NEWESTa7.stable")
+func GetLatest(ver, branch string) (string, error) {
+	str := fmt.Sprintf("NEWEST%s.%s", ver, branch)
+	getLatestLock.RLock()
+	c, ok := getLatestCache[str]
+	getLatestLock.RUnlock()
+	if ok {
+		return c, nil
+	}
+	getLatestLock.Lock()
+	defer getLatestLock.Unlock()
+	resp, err := http.Get(fmt.Sprintf("%s/%s", mikrotikUpgradeBaseURL, str))
 	if err != nil {
 		return "", err
 	}
@@ -41,20 +56,22 @@ func GetLatest() (string, error) {
 		return "", err
 	}
 	ss := strings.Split(string(s), " ")
+	getLatestCache[str] = ss[0]
 	return ss[0], nil
 }
 
-func (c *Cache) GetPackage(pkg PkgID) ([]byte, error) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	if bb, ok := c.cache[pkg]; ok {
+func GetPackage(pkg PkgID) ([]byte, error) {
+	packageLock.Lock()
+	defer packageLock.Unlock()
+	if bb, ok := packageCache[pkg]; ok {
 		return bb, nil
 	}
 	fname := fmt.Sprintf("%s-%s-%s.npk", pkg.Name, pkg.Version, pkg.Architecture)
 	fname = strings.ReplaceAll(fname, "-x86_64.npk", ".npk") // x86 does not have a suffix
 	log.Printf("downloading \"%s\"", fname)
 	url := fmt.Sprintf(
-		"http://upgrade.mikrotik.com/routeros/%s/%s",
+		"%s/%s/%s",
+		mikrotikUpgradeBaseURL,
 		pkg.Version, fname,
 	)
 	//nolint:gosec,G107
@@ -71,6 +88,6 @@ func (c *Cache) GetPackage(pkg PkgID) ([]byte, error) {
 		return nil, err
 	}
 	log.Printf("downloaded \"%s\" (%d bytes)", fname, len(bb))
-	c.cache[pkg] = bb
+	packageCache[pkg] = bb
 	return bb, nil
 }

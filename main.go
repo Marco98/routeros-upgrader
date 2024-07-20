@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ type RosParams struct {
 	Password        string
 	Pkgs            []rosapi.RosPkg
 	Arch            string
+	MajorVersion    int
 	CurrentFirmware string
 	UpgradeFirmware string
 	Conn            *ssh.Client
@@ -55,6 +57,7 @@ func main() {
 func run() error {
 	// Config
 	tver := flag.String("tgt", "latest", "target package version")
+	branch := flag.String("b", "stable", "set branch (stable, testing, ..)")
 	noupdfw := flag.Bool("nofw", false, "dont upgrade routerboard firmware")
 	cpath := flag.String("c", "routers.yml", "config path")
 	tags := flag.String("t", "", "filter tags")
@@ -77,16 +80,6 @@ func run() error {
 		return err
 	}
 
-	// Get latest version
-	if *tver == "latest" {
-		lver, err := rospkg.GetLatest()
-		if err != nil {
-			return err
-		}
-		tver = &lver
-	}
-	log.Printf("the target version is: %s", *tver)
-
 	// Connect
 	err = connectRouters(rts)
 	for _, rt := range rts {
@@ -101,10 +94,10 @@ func run() error {
 	// Plan upgrades
 	log.Println("checking installed packages")
 	if err := getRouterPkgInfo(rts); err != nil {
-		return err
+		return fmt.Errorf("failed fetching package info: %w", err)
 	}
 	rts = injectExtpkgs(rts)
-	pkgupdrts, fwupdrts := planUpgrades(rts, tver, *noupdfw)
+	pkgupdrts, fwupdrts := planUpgrades(rts, *tver, *branch, *noupdfw)
 	if len(pkgupdrts) == 0 && len(fwupdrts) == 0 {
 		log.Println("no action required - exiting")
 		return nil
@@ -114,7 +107,7 @@ func run() error {
 	}
 
 	// Upgrade
-	if err := uploadPackages(pkgupdrts, *tver); err != nil {
+	if err := uploadPackages(pkgupdrts); err != nil {
 		return err
 	}
 	if err := upgradeFirmware(fwupdrts); err != nil {
@@ -219,7 +212,7 @@ func connectRouters(rts []RosParams) error {
 	return wg.Wait()
 }
 
-func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupdrts []RosParams) {
+func planUpgrades(rts []RosParams, tver, branch string, noupdfw bool) (pkgupdrts, fwupdrts []RosParams) {
 	pkgupdrts = make([]RosParams, 0)
 	fwupdrts = make([]RosParams, 0)
 	for _, rt := range rts {
@@ -230,15 +223,23 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 			)
 			continue
 		}
-		for _, p := range rt.Pkgs {
-			if p.Version != *tver {
+		lver, err := resolveTargetVersion(tver, branch, rt.MajorVersion)
+		if err != nil {
+			color.Red(
+				"|ERR> %s: unknown target version\n", rt.Name,
+			)
+			continue
+		}
+		for i, p := range rt.Pkgs {
+			if p.VersionCurrent != lver {
+				rt.Pkgs[i].VersionTarget = lver
 				pkg = true
 				continue
 			}
 			color.Green(
 				"|OK> %s: %s-%s-%s\n",
 				rt.Name,
-				p.Name, p.Version, rt.Arch,
+				p.Name, p.VersionCurrent, rt.Arch,
 			)
 		}
 		if pkg {
@@ -255,14 +256,14 @@ func planUpgrades(rts []RosParams, tver *string, noupdfw bool) (pkgupdrts, fwupd
 	// print results
 	for _, r := range pkgupdrts {
 		for _, p := range r.Pkgs {
-			if p.Version == *tver {
+			if p.VersionCurrent == tver {
 				continue
 			}
 			color.Yellow(
 				"|UP> %s: %s-%s-%s => %s-%s-%s\n",
 				r.Name,
-				p.Name, p.Version, r.Arch,
-				p.Name, *tver, r.Arch,
+				p.Name, p.VersionCurrent, r.Arch,
+				p.Name, p.VersionTarget, r.Arch,
 			)
 		}
 	}
@@ -331,8 +332,7 @@ func rebootRouters(rts []RosParams, delay uint) error {
 	return wg.Wait()
 }
 
-func uploadPackages(rts []RosParams, lver string) error {
-	cache := rospkg.NewCache()
+func uploadPackages(rts []RosParams) error {
 	wg := new(errgroup.Group)
 	for _, frt := range rts {
 		rt := frt
@@ -343,15 +343,15 @@ func uploadPackages(rts []RosParams, lver string) error {
 			}
 			defer client.Close()
 			for _, p := range rt.Pkgs {
-				pkg, err := cache.GetPackage(rospkg.PkgID{
+				pkg, err := rospkg.GetPackage(rospkg.PkgID{
 					Name:         p.Name,
-					Version:      lver,
+					Version:      p.VersionTarget,
 					Architecture: rt.Arch,
 				})
 				if err != nil {
 					return err
 				}
-				fname := fmt.Sprintf("%s-%s-%s.npk", p.Name, lver, rt.Arch)
+				fname := fmt.Sprintf("%s-%s-%s.npk", p.Name, p.VersionTarget, rt.Arch)
 				f, err := client.Create(fname)
 				if err != nil {
 					return err
@@ -425,24 +425,29 @@ func getRouterPkgInfo(rts []RosParams) error {
 			}
 			pp, err := rosapi.GetPackages(rt.Conn)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed GetPackages: %w", err)
 			}
 			rt.Pkgs = pp
 			arch, err := rosapi.GetArchitecture(rt.Conn)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed GetArchitecture: %w", err)
 			}
 			rt.Arch = arch
 			fwcurrent, err := rosapi.GetFirmwareCurrent(rt.Conn)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed GetFirmwareCurrent: %w", err)
 			}
 			rt.CurrentFirmware = fwcurrent
 			fwnew, err := rosapi.GetFirmwareUpgrade(rt.Conn)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed GetFirmwareUpgrade: %w", err)
 			}
 			rt.UpgradeFirmware = fwnew
+			major, err := strconv.Atoi(strings.Split(rt.Pkgs[0].VersionCurrent, ".")[0])
+			if err != nil {
+				return fmt.Errorf("major version unknown: %w", err)
+			}
+			rt.MajorVersion = major
 			rts[i] = rt
 			return nil
 		})
@@ -462,8 +467,8 @@ func injectExtpkgs(rts []RosParams) []RosParams {
 			}
 			if !matched {
 				r.Pkgs = append(r.Pkgs, rosapi.RosPkg{
-					Name:    ep,
-					Version: "0.0.0",
+					Name:           ep,
+					VersionCurrent: "0.0.0",
 				})
 			}
 		}
@@ -483,4 +488,15 @@ func splitparamlist(s string) []string {
 func printVersion() error {
 	_, err := fmt.Printf("Version: %s\nCommit Hash: %s\nBuild Date: %s\n", version, commit, date)
 	return err
+}
+
+func resolveTargetVersion(tver, branch string, majorVersion int) (string, error) {
+	if tver != "latest" {
+		return tver, nil
+	}
+	mv := strconv.Itoa(majorVersion)
+	if majorVersion == 7 {
+		mv = fmt.Sprintf("a%s", mv)
+	}
+	return rospkg.GetLatest(mv, branch)
 }

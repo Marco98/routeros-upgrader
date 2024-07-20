@@ -9,12 +9,22 @@ import (
 )
 
 type RosPkg struct {
-	Name      string
-	Version   string
-	BuildTime string
-	GitCommit string
-	Scheduled string
+	Name           string
+	VersionCurrent string
+	VersionTarget  string
+	BuildTime      string
+	GitCommit      string
+	Scheduled      string
 }
+
+const (
+	commandGetPackages        = "/system package print terse"
+	commandGetArchitecture    = ":put [/system resource get architecture-name]"
+	commandGetFirmwareCurrent = ":put [/system routerboard get current-firmware]"
+	commandGetFirmwareUpgrade = ":put [/system routerboard get upgrade-firmware]"
+	commandDoFirmwareUpgrade  = "/system routerboard upgrade"
+	commandExecReboot         = ":delay %ds;/system reboot"
+)
 
 func GetPackages(conn *ssh.Client) ([]RosPkg, error) {
 	sess, err := conn.NewSession()
@@ -22,7 +32,7 @@ func GetPackages(conn *ssh.Client) ([]RosPkg, error) {
 		return nil, err
 	}
 	defer sess.Close()
-	out, err := sess.Output("/system/package/print terse")
+	out, err := sess.Output(commandGetPackages)
 	if err != nil {
 		return nil, err
 	}
@@ -33,11 +43,11 @@ func GetPackages(conn *ssh.Client) ([]RosPkg, error) {
 	pkgs := make([]RosPkg, len(sout))
 	for i := 0; i < len(sout); i++ {
 		pkgs[i] = RosPkg{
-			Name:      sout[i]["name"],
-			Version:   sout[i]["version"],
-			BuildTime: sout[i]["build-time"],
-			GitCommit: sout[i]["git-commit"],
-			Scheduled: sout[i]["scheduled"],
+			Name:           sout[i]["name"],
+			VersionCurrent: sout[i]["version"],
+			BuildTime:      sout[i]["build-time"],
+			GitCommit:      sout[i]["git-commit"],
+			Scheduled:      sout[i]["scheduled"],
 		}
 	}
 	return pkgs, nil
@@ -49,7 +59,7 @@ func GetArchitecture(conn *ssh.Client) (string, error) {
 		return "", err
 	}
 	defer sess.Close()
-	out, err := sess.Output(":put [/system/resource/get architecture-name]")
+	out, err := sess.Output(commandGetArchitecture)
 	if err != nil {
 		return "", err
 	}
@@ -64,9 +74,12 @@ func GetFirmwareCurrent(conn *ssh.Client) (string, error) {
 		return "", err
 	}
 	defer sess.Close()
-	out, err := sess.Output(":put [/system/routerboard/get current-firmware]")
+	out, err := sess.Output(commandGetFirmwareCurrent)
 	if err != nil {
 		if strings.Contains(string(out), "syntax error") {
+			return "", nil
+		}
+		if strings.Contains(string(out), "bad command name") {
 			return "", nil
 		}
 		return "", err
@@ -82,9 +95,12 @@ func GetFirmwareUpgrade(conn *ssh.Client) (string, error) {
 		return "", err
 	}
 	defer sess.Close()
-	out, err := sess.Output(":put [/system/routerboard/get upgrade-firmware]")
+	out, err := sess.Output(commandGetFirmwareUpgrade)
 	if err != nil {
 		if strings.Contains(string(out), "syntax error") {
+			return "", nil
+		}
+		if strings.Contains(string(out), "bad command name") {
 			return "", nil
 		}
 		return "", err
@@ -100,7 +116,7 @@ func DoFirmwareUpgrade(conn *ssh.Client) error {
 		return err
 	}
 	defer sess.Close()
-	return sess.Run("/system/routerboard/upgrade")
+	return sess.Run(commandDoFirmwareUpgrade)
 }
 
 func ExecReboot(conn *ssh.Client, secs uint) error {
@@ -109,13 +125,14 @@ func ExecReboot(conn *ssh.Client, secs uint) error {
 		return err
 	}
 	defer sess.Close()
-	return sess.Start(fmt.Sprintf(":delay %ds;/system/reboot", secs))
+	return sess.Start(fmt.Sprintf(commandExecReboot, secs))
 }
 
 func parseTerse(terse string) (map[int]map[string]string, error) {
 	pkgs := make(map[int]map[string]string, 0)
 	terse = strings.ReplaceAll(terse, "\r", "")
 	for _, l := range strings.Split(terse, "\n") {
+		l = strings.TrimSpace(l)
 		v := strings.Split(l, " ")
 		if len(v) <= 1 {
 			continue
