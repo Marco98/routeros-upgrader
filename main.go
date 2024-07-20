@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -14,8 +13,8 @@ import (
 
 	"github.com/Marco98/routeros-upgrader/pkg/rosapi"
 	"github.com/Marco98/routeros-upgrader/pkg/rospkg"
-	"github.com/fatih/color"
 	"github.com/pkg/sftp"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
@@ -50,7 +49,7 @@ type RosParams struct {
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatalf("fatal error: %s", err)
+		logrus.Fatalf("fatal error: %s", err)
 	}
 }
 
@@ -65,8 +64,12 @@ func run() error {
 	forceyes := flag.Bool("y", false, "force yes")
 	delaysecs := flag.Uint("d", 10, "reboot delay in seconds")
 	extpkgsS := flag.String("extpkgs", "", "install additional packages")
-	prversion := flag.Bool("v", false, "print version")
+	verbose := flag.Bool("v", false, "verbose logs")
+	prversion := flag.Bool("version", false, "print version")
 	flag.Parse()
+	if *verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 	if *prversion {
 		return printVersion()
 	}
@@ -92,14 +95,14 @@ func run() error {
 	}
 
 	// Plan upgrades
-	log.Println("checking installed packages")
+	logrus.Println("checking installed packages")
 	if err := getRouterPkgInfo(rts); err != nil {
 		return fmt.Errorf("failed fetching package info: %w", err)
 	}
 	rts = injectExtpkgs(rts)
 	pkgupdrts, fwupdrts := planUpgrades(rts, *tver, *branch, *noupdfw)
 	if len(pkgupdrts) == 0 && len(fwupdrts) == 0 {
-		log.Println("no action required - exiting")
+		logrus.Println("no action required - exiting")
 		return nil
 	}
 	if !askYN("Install?", *forceyes) {
@@ -217,17 +220,14 @@ func planUpgrades(rts []RosParams, tver, branch string, noupdfw bool) (pkgupdrts
 	fwupdrts = make([]RosParams, 0)
 	for _, rt := range rts {
 		pkg := false
+		log := logrus.WithField("router", rt.Name)
 		if rt.Conn == nil {
-			color.Red(
-				"|DN> %s: unreachable\n", rt.Name,
-			)
+			log.Error("unreachable")
 			continue
 		}
 		lver, err := resolveTargetVersion(tver, branch, rt.MajorVersion)
 		if err != nil {
-			color.Red(
-				"|ERR> %s: unknown target version\n", rt.Name,
-			)
+			log.WithError(err).Error("unknown target version")
 			continue
 		}
 		for i, p := range rt.Pkgs {
@@ -236,11 +236,10 @@ func planUpgrades(rts []RosParams, tver, branch string, noupdfw bool) (pkgupdrts
 				pkg = true
 				continue
 			}
-			color.Green(
-				"|OK> %s: %s-%s-%s\n",
-				rt.Name,
-				p.Name, p.VersionCurrent, rt.Arch,
-			)
+			log.WithFields(logrus.Fields{
+				"package": p.Name,
+				"version": p.VersionCurrent,
+			}).Debug("package is up-to-date")
 		}
 		if pkg {
 			pkgupdrts = append(pkgupdrts, rt)
@@ -259,19 +258,20 @@ func planUpgrades(rts []RosParams, tver, branch string, noupdfw bool) (pkgupdrts
 			if p.VersionCurrent == tver {
 				continue
 			}
-			color.Yellow(
-				"|UP> %s: %s-%s-%s => %s-%s-%s\n",
-				r.Name,
-				p.Name, p.VersionCurrent, r.Arch,
-				p.Name, p.VersionTarget, r.Arch,
-			)
+			logrus.WithFields(logrus.Fields{
+				"router":  r.Name,
+				"package": p.Name,
+				"version": p.VersionCurrent,
+				"target":  p.VersionTarget,
+			}).Info("will upgrade package")
 		}
 	}
 	for _, r := range fwupdrts {
-		color.Yellow(
-			"|UP> %s: fw %s => fw %s\n",
-			r.Name, r.CurrentFirmware, r.UpgradeFirmware,
-		)
+		logrus.WithFields(logrus.Fields{
+			"router":  r.Name,
+			"version": r.CurrentFirmware,
+			"target":  r.UpgradeFirmware,
+		}).Info("will upgrade firmware")
 	}
 	return pkgupdrts, fwupdrts
 }
@@ -296,10 +296,7 @@ func filterPowerdepList(rr []RosParams, pd []string) []RosParams {
 	nrr := make([]RosParams, 0)
 	for _, r := range rr {
 		if contiansString(pd, r.Name) {
-			color.Cyan(
-				"|PD> %s: (powerdep)\n",
-				r.Name,
-			)
+			logrus.WithField("router", r.Name).Warn("skip due to powerdep")
 			continue
 		}
 		nrr = append(nrr, r)
@@ -325,7 +322,10 @@ func rebootRouters(rts []RosParams, delay uint) error {
 			if err := rosapi.ExecReboot(rt.Conn, delay); err != nil {
 				return err
 			}
-			log.Printf("%s: rebooting in %ds", rt.Name, delay)
+			logrus.WithFields(logrus.Fields{
+				"router": rt.Name,
+				"delay":  delay,
+			}).Info("initiated reboot")
 			return nil
 		})
 	}
@@ -361,7 +361,10 @@ func uploadPackages(rts []RosParams) error {
 				if err != nil {
 					return err
 				}
-				log.Printf("%s: uploaded %s", rt.Name, fname)
+				logrus.WithFields(logrus.Fields{
+					"router": rt.Name,
+					"file":   fname,
+				}).Info("file uploaded")
 			}
 			return nil
 		})
@@ -377,7 +380,7 @@ func upgradeFirmware(rts []RosParams) error {
 			if err := rosapi.DoFirmwareUpgrade(rt.Conn); err != nil {
 				return err
 			}
-			log.Printf("%s: upgraded firmware", rt.Name)
+			logrus.WithField("router", rt.Name).Info("upgraded firmware")
 			return nil
 		})
 	}
@@ -392,7 +395,7 @@ func askYN(question string, forceyes bool) bool {
 	fmt.Printf("%s [y/N]: ", question)
 	response, err := reader.ReadString('\n')
 	if err != nil {
-		log.Fatal(err)
+		logrus.Fatal(err)
 	}
 	return strings.ToLower(strings.TrimSpace(response)) == "y"
 }
