@@ -3,10 +3,11 @@ package rospkg
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -68,7 +69,8 @@ func GetPackage(pkg PkgID) ([]byte, error) {
 	}
 	fname := fmt.Sprintf("%s-%s-%s.npk", pkg.Name, pkg.Version, pkg.Architecture)
 	fname = strings.ReplaceAll(fname, "-x86_64.npk", ".npk") // x86 does not have a suffix
-	log.Printf("downloading \"%s\"", fname)
+	log := logrus.WithField("file", fname)
+	log.Debug("file downloading")
 	url := fmt.Sprintf(
 		"%s/%s/%s",
 		mikrotikUpgradeBaseURL,
@@ -87,7 +89,7 @@ func GetPackage(pkg PkgID) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("downloaded \"%s\" (%d bytes)", fname, len(bb))
+	log.WithField("bytes", len(bb)).Info("file downloaded")
 	packageCache[pkg] = bb
 	return bb, nil
 }
