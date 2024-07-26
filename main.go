@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -28,9 +29,10 @@ const (
 )
 
 var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
+	version                  = "dev"
+	commit                   = "none"
+	date                     = "unknown"
+	errPendingUpdatesRefused = errors.New("pending updates forced with no")
 )
 
 type RosParams struct {
@@ -49,7 +51,11 @@ type RosParams struct {
 }
 
 func main() {
-	if err := run(); err != nil {
+	err := run()
+	if errors.Is(err, errPendingUpdatesRefused) {
+		os.Exit(2)
+	}
+	if err != nil {
 		log.Fatalf("fatal error: %s", err)
 	}
 }
@@ -63,6 +69,7 @@ func run() error {
 	tags := flag.String("t", "", "filter tags")
 	limit := flag.String("l", "", "limit routers")
 	forceyes := flag.Bool("y", false, "force yes")
+	forceno := flag.Bool("n", false, "force no")
 	delaysecs := flag.Uint("d", 10, "reboot delay in seconds")
 	extpkgsS := flag.String("extpkgs", "", "install additional packages")
 	prversion := flag.Bool("v", false, "print version")
@@ -102,8 +109,11 @@ func run() error {
 		log.Println("no action required - exiting")
 		return nil
 	}
+	if *forceno {
+		return errPendingUpdatesRefused
+	}
 	if !askYN("Install?", *forceyes) {
-		return nil
+		return errPendingUpdatesRefused
 	}
 
 	// Upgrade

@@ -40,6 +40,8 @@ Run the tool!
 
 ```shell
 Usage of routeros-upgrader:
+  -b string
+        set branch (stable, testing, ..) (default "stable")
   -c string
         config path (default "routers.yml")
   -d uint
@@ -48,6 +50,7 @@ Usage of routeros-upgrader:
         install additional packages
   -l string
         limit routers
+  -n    force no
   -nofw
         dont upgrade routerboard firmware
   -t string
