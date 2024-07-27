@@ -33,6 +33,7 @@ var (
 	commit                   = "none"
 	date                     = "unknown"
 	errPendingUpdatesRefused = errors.New("pending updates forced with no")
+	errRouterUnreachable     = errors.New("one or more routers unreachable")
 )
 
 type RosParams struct {
@@ -107,6 +108,11 @@ func run() error {
 	pkgupdrts, fwupdrts := planUpgrades(rts, *tver, *branch, *noupdfw)
 	if len(pkgupdrts) == 0 && len(fwupdrts) == 0 {
 		log.Println("no action required - exiting")
+		for _, v := range rts {
+			if v.Conn == nil {
+				return errRouterUnreachable
+			}
+		}
 		return nil
 	}
 	if *forceno {
