@@ -71,7 +71,7 @@ func run() error {
 	limit := flag.String("l", "", "limit routers")
 	forceyes := flag.Bool("y", false, "force yes")
 	forceno := flag.Bool("n", false, "force no")
-	delaysecs := flag.Uint("d", 10, "reboot delay in seconds")
+	delaysecs := flag.String("d", "10", "reboot delay in seconds or in time.ParseDuration")
 	extpkgsS := flag.String("extpkgs", "", "install additional packages")
 	prversion := flag.Bool("v", false, "print version")
 	flag.Parse()
@@ -84,6 +84,10 @@ func run() error {
 		splitparamlist(*limit),
 		splitparamlist(*extpkgsS),
 	)
+	if err != nil {
+		return err
+	}
+	parsedDelaysecs, err := parseDelaysecs(*delaysecs)
 	if err != nil {
 		return err
 	}
@@ -134,7 +138,7 @@ func run() error {
 	if !askYN("Execute synchronized reboot?", *forceyes) {
 		return nil
 	}
-	return rebootRouters(append(pkgupdrts, fwupdrts...), *delaysecs)
+	return rebootRouters(append(pkgupdrts, fwupdrts...), parsedDelaysecs)
 }
 
 type Conf struct {
@@ -515,4 +519,15 @@ func resolveTargetVersion(tver, branch string, majorVersion int) (string, error)
 		mv = fmt.Sprintf("a%s", mv)
 	}
 	return rospkg.GetLatest(mv, branch)
+}
+
+func parseDelaysecs(s string) (uint, error) {
+	if _, err := strconv.ParseUint(s, 10, 64); err == nil {
+		s = fmt.Sprintf("%ss", s)
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	return uint(d.Seconds()), nil
 }

@@ -44,8 +44,8 @@ Usage of routeros-upgrader:
         set branch (stable, testing, ..) (default "stable")
   -c string
         config path (default "routers.yml")
-  -d uint
-        reboot delay in seconds (default 10)
+  -d string
+        reboot delay in seconds or in time.ParseDuration
   -extpkgs string
         install additional packages
   -l string
