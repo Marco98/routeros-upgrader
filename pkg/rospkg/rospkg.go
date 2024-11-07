@@ -18,6 +18,17 @@ var (
 	packageLock    *sync.Mutex
 	getLatestCache map[string]string
 	getLatestLock  *sync.RWMutex
+	architectures  = []string{
+		"arm",
+		"arm64",
+		"mipsbe",
+		"mmips",
+		"smips",
+		"tile",
+		"ppc",
+		"x86_64",
+		"x86",
+	}
 )
 
 func init() {
@@ -66,7 +77,11 @@ func GetPackage(pkg PkgID) ([]byte, error) {
 	if bb, ok := packageCache[pkg]; ok {
 		return bb, nil
 	}
-	fname := fmt.Sprintf("%s-%s-%s.npk", pkg.Name, pkg.Version, pkg.Architecture)
+	pname := stripArchitectures(pkg.Name)
+	fname := fmt.Sprintf("%s-%s-%s.npk", pname, pkg.Version, pkg.Architecture)
+	if strings.HasPrefix(pkg.Version, "6.") {
+		fname = fmt.Sprintf("%s-%s-%s.npk", pname, pkg.Architecture, pkg.Version)
+	}
 	fname = strings.ReplaceAll(fname, "-x86_64.npk", ".npk") // x86 does not have a suffix
 	log.Printf("downloading \"%s\"", fname)
 	url := fmt.Sprintf(
@@ -90,4 +105,11 @@ func GetPackage(pkg PkgID) ([]byte, error) {
 	log.Printf("downloaded \"%s\" (%d bytes)", fname, len(bb))
 	packageCache[pkg] = bb
 	return bb, nil
+}
+
+func stripArchitectures(s string) string {
+	for _, v := range architectures {
+		s = strings.ReplaceAll(s, fmt.Sprintf("-%s", v), "")
+	}
+	return s
 }
