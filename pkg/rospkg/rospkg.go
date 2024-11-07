@@ -79,7 +79,7 @@ func GetPackage(pkg PkgID) ([]byte, error) {
 	}
 	pname := stripArchitectures(pkg.Name)
 	fname := fmt.Sprintf("%s-%s-%s.npk", pname, pkg.Version, pkg.Architecture)
-	if strings.HasPrefix(pkg.Version, "6.") {
+	if strings.HasPrefix(pkg.Version, "6.") && strings.Contains(pname, "routeros") {
 		fname = fmt.Sprintf("%s-%s-%s.npk", pname, pkg.Architecture, pkg.Version)
 	}
 	fname = strings.ReplaceAll(fname, "-x86_64.npk", ".npk") // x86 does not have a suffix
