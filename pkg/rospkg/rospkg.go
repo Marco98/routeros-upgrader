@@ -19,8 +19,8 @@ var (
 	getLatestCache map[string]string
 	getLatestLock  *sync.RWMutex
 	architectures  = []string{
-		"arm",
 		"arm64",
+		"arm",
 		"mipsbe",
 		"mmips",
 		"smips",

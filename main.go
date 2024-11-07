@@ -52,15 +52,7 @@ type RosParams struct {
 }
 
 func main() {
-	_, err := rospkg.GetPackage(rospkg.PkgID{
-		Name:         "routeros-arm",
-		Architecture: "arm",
-		Version:      "6.49.17",
-	})
-	if err != nil {
-		log.Fatalln(err)
-	}
-	err = run()
+	err := run()
 	if errors.Is(err, errPendingUpdatesRefused) {
 		os.Exit(2)
 	}
