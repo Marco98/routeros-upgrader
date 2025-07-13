@@ -40,15 +40,18 @@ func GetPackages(conn *ssh.Client) ([]RosPkg, error) {
 	if err != nil {
 		return nil, err
 	}
-	pkgs := make([]RosPkg, len(sout))
-	for i := 0; i < len(sout); i++ {
-		pkgs[i] = RosPkg{
-			Name:           sout[i]["name"],
-			VersionCurrent: sout[i]["version"],
-			BuildTime:      sout[i]["build-time"],
-			GitCommit:      sout[i]["git-commit"],
-			Scheduled:      sout[i]["scheduled"],
+	pkgs := make([]RosPkg, 0)
+	for _, v := range sout {
+		if len(v["version"]) == 0 {
+			continue
 		}
+		pkgs = append(pkgs, RosPkg{
+			Name:           v["name"],
+			VersionCurrent: v["version"],
+			BuildTime:      v["build-time"],
+			GitCommit:      v["git-commit"],
+			Scheduled:      v["scheduled"],
+		})
 	}
 	return pkgs, nil
 }
